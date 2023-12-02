@@ -1,5 +1,7 @@
 ---
-title: "Linear Models"
+title: "p8105_hw6_cw3555"
+author: "Eunice Wang"
+date: '`2023-12-02`'
 output: github_document
 ---
 
@@ -29,221 +31,96 @@ Load key packages.
 
 ```{r}
 library(tidyverse)
+library(modelr)
 library(p8105.datasets)
+
+set.seed(1)
 ```
 
+### Problem 1
 
-
-## Load and clean the Airbnb data
-
-```{r}
-data("nyc_airbnb")
-
-nyc_airbnb = 
-  nyc_airbnb |> 
-  mutate(stars = review_scores_location / 2) |> 
-  select(
-    price, stars, borough = neighbourhood_group, 
-    neighbourhood, room_type) |> 
-  filter(borough != "Staten Island")
-
-```
-
-
-Let's fit a model!!
+#### Load and clean the raw data.
 
 ```{r}
-fit = 
-  nyc_airbnb |> 
-  lm(price ~ stars + borough, data = _)
-```
-
-
-Let's look at the `fit`
-
-```{r}
-fit
-summary(fit)
-summary(fit)$coef
-coef(fit)
-fitted.values(fit)
-```
-
-tidy up the output instead(what we generally do)
-
-```{r}
-fit |> 
-  broom::glance()
-```
-
-
-tidy up the coefficients
-
-```{r}
-fit |> 
-  broom::tidy() |> 
-  mutate(term = str_replace(term, "^borough", "Borough: ")) |> # ^-starts witj
-  select(term, estimate, p.value) |> 
-  knitr::kable(digits = 3)
-```
-
-## Fit another model
-
-
-```{r}
-fit = 
-  nyc_airbnb |> 
-  mutate(
-    borough = fct_infreq(borough),
-    room_type = fct_infreq(room_type)
-  ) |> # change borough comparison to Manhattan
-  lm(price ~ stars + borough + room_type, data = _)
-
-fit |> 
-  broom::tidy()
-```
-
-
-## Quick look at diagnostics
-
-```{r}
-nyc_airbnb |> 
-  modelr::add_residuals(fit) |> # add columns for residuals
-  ggplot(aes(x = borough, y = resid)) + 
-  geom_violin() 
-
-nyc_airbnb |> 
-  modelr::add_residuals(fit) |> 
-  ggplot(aes(x = stars, y = resid)) + 
-  geom_point() 
-
-```
-
-Now with a qq plot!
-
-```{r}
-nyc_airbnb |> 
-  modelr::add_residuals(fit) |> 
-  ggplot(aes(sample = resid)) + 
-  stat_qq() + 
-  stat_qq_line()
-```
-
-## Hypothesis test for categorical predictor
-
-fit a "null" and "alternative" model
-
-```{r}
-fit_null = lm(price ~ stars + borough, data = nyc_airbnb)
-fit_alternative = lm(price ~ stars + borough + room_type, data = nyc_airbnb)
-
-anova(fit_null, fit_alternative) |> 
-  broom::tidy()
-
-```
-
-
-
-## Borough-level differences
-
-```{r}
-fit = 
-  nyc_airbnb |> 
-  lm(price ~ stars * borough + room_type * borough, data = _) # * adding interaction, stars varied by borough
-
-fit |> 
-  broom::tidy()
-```
- 
-fill 4 separate linear models for each borough by creating a dataframe with all info of 4 boroughs
-
-```{r}
-airbnb_lm = function(df) {
-  lm(price ~ stars + room_type, data = df)
-}
-
-nyc_airbnb |> 
-  nest(df = -borough) |> # everything except for borugh
-  mutate(
-    models = map(df, airbnb_lm),
-    results = map(models, broom::tidy)
-  ) |> 
-  select(borough, results) |> 
-  unnest(results) |> 
-  select(borough, term, estimate) |> 
-  pivot_wider(
-    names_from = term,
-    values_from = estimate
-  ) |> 
-  knitr::kable(digits = 2)
-
-
-```
-
-same thing but just a little different
-
-
-```{r}
-nyc_airbnb |> 
-  nest(df = -borough) |> 
-  mutate(
-    models = map(df, \(df) lm(price ~ stars + room_type, data = df)),
-    results = map(models, broom::tidy)
-  ) |> #change ton anomalous fucntion"\" without need to wirte airbnb function first
-  select(borough, results) |> 
-  unnest(results) |> 
-  select(borough, term, estimate) |> 
-  pivot_wider(
-    names_from = term,
-    values_from = estimate
-  ) |> 
-  knitr::kable(digits = 2)
-```
-
-
-
-## Homicides in Baltimore
-
-```{r}
-baltimore_df = 
+homicide_df=
   read_csv("data/homicide-data.csv") |> 
-  filter(city == "Baltimore") |> 
+  janitor::clean_names() |> 
   mutate(
-    resolved = as.numeric(disposition == "Closed by arrest"),
-    victim_age = as.numeric(victim_age)
-  ) |> 
-  select(resolved, victim_age, victim_race, victim_sex)
+    city_state=str_c(city,state,sep =", "),
+    resolved = as.numeric(disposition == "Closed by arrest"), 
+    victim_age=as.numeric(victim_age)
+    )|> 
+      filter(!city_state %in% c("Dallas, TX","Phoenix, AZ", "Kansas City, MO", "Tulsa, AL" )) |> 
+      filter(victim_race %in% c("Black", "White")) |> 
+  select(city_state,resolved, victim_age, victim_sex, victim_race)
 ```
 
-
-fitting a logistic regression
+#### Fit a logistic regression for Baltimore, MD and save the results for estimates
 
 ```{r}
-fit_logistic = 
-  baltimore_df |> 
+fit_baltimore=
+  homicide_df |> 
+  filter(city_state=="Baltimore, MD") |> 
   glm(
-    resolved ~ victim_age + victim_race + victim_sex, 
+    resolved ~ victim_age + victim_sex + victim_race, 
     data = _, 
     family = binomial())
-```
 
-look at model results
-
-```{r}
-fit_logistic |> 
+baltimore_results=
+fit_baltimore |> 
   broom::tidy() |> 
-  mutate(OR = exp(estimate)) |> 
-  select(term, estimate, OR)
+  mutate(
+    OR = exp(estimate),
+    OR_CI_lower = exp(estimate-1.96*std.error),
+    OR_CI_upper = exp(estimate+1.96*std.error)
+    ) |> 
+  filter(term=="victim_sexMale") |> 
+  select(OR,OR_CI_lower,OR_CI_upper) 
 ```
 
+The estimated proportion of unsolve homicides in Baltimore, MD is `r pull(baltimore_results,OR)`and the CI is [`r pull(baltimore_results,OR_CI_lower)`, `r pull(baltimore_results,OR_CI_upper)`]
+
+
+#### Fit a logistic regression for each of the cities and save the results for estimates
 
 ```{r}
-baltimore_df |> 
-  count(victim_race)
+city_glm_model=
+  homicide_df |> 
+  nest(df = -city_state) |> 
+  mutate(
+    models = map(df, \(df) glm(resolved ~ victim_age + victim_sex +victim_race, family = binomial(), data = df)),
+    results = map(models, broom::tidy)
+  ) |>
+  select(city_state, results) |> 
+  unnest(results) |> 
+  mutate(
+    OR = exp(estimate),
+    OR_CI_lower = exp(estimate-1.96*std.error),
+    OR_CI_upper = exp(estimate+1.96*std.error)
+    ) |> 
+    filter(term=="victim_sexMale") |> 
+    select(city_state,OR,OR_CI_lower,OR_CI_upper) 
 
+city_glm_model |> 
+  head() |> 
+  knitr::kable(digits = 2) 
 ```
 
+#### Create a plot that shows the estimates for each city and comment
 
+```{r}
+city_glm_model |>  
+  ggplot(aes(x=fct_reorder(city_state, OR), y=OR, ymin=OR_CI_lower, ymax=OR_CI_upper))+
+  geom_point()+
+  geom_errorbar()+
+  theme(axis.text.x=element_text(angle=90, vjust=0.5,hjust=1))+
+  labs(
+    x="City_State",
+    y="Adjuested Estimated Odds Ratio" ,
+    title="The estimated ORs and CIs for each city"
+  )
+```
 
+The plots shows the estimated ORs and CIs for each city. The estimated odds ratio is ordered from the smallest estimated OR to the largest one. In most cities, the estimated odds ratio is less than 1. CIs in most cities are narrow and do not contain 1, which implies a significant difference in resolved rates between both sexes after adjustment.
 
 
