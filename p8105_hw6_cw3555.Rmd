@@ -123,4 +123,121 @@ city_glm_model |>
 
 The plots shows the estimated ORs and CIs for each city. The estimated odds ratio is ordered from the smallest estimated OR to the largest one. In most cities, the estimated odds ratio is less than 1. CIs in most cities are narrow and do not contain 1, which implies a significant difference in resolved rates between both sexes after adjustment.
 
+### Problem 2
 
+#### Load and clean the raw data.
+
+```{r}
+weather_df = 
+  rnoaa::meteo_pull_monitors(
+    c("USW00094728"),
+    var = c("PRCP", "TMIN", "TMAX"), 
+    date_min = "2022-01-01",
+    date_max = "2022-12-31") |>
+  mutate(
+    name = recode(id, USW00094728 = "CentralPark_NY"),
+    tmin = tmin / 10,
+    tmax = tmax / 10) |>
+  select(name, id, everything())
+```
+
+#### Fit a linear regression
+```{r}
+weather_lm=
+  lm(tmax ~ tmin+prcp, data=weather_df)
+broom::tidy(weather_lm)
+broom::glance(weather_lm)
+```
+
+#### Bootstrap for r̂ 2
+
+```{r}
+boot_results_rsq = 
+  weather_df |> 
+   modelr::bootstrap(n = 5000) |> 
+   mutate(
+    models = map(strap, \(df) lm(tmax ~ tmin+prcp, data=df)),
+    results = map(models, broom::glance),
+  ) |> 
+  select(results) |> 
+  unnest(results) 
+```
+
+Make a plot of r̂ 2
+
+```{r}
+boot_results_rsq|> 
+  select(r.squared) |> 
+  ggplot(aes(x=r.squared))+
+  geom_density()+
+  labs(
+    x="Bootstrap R-squared",
+    y="Frequency",
+    title="Distribution of Bootstrap Estimated R-squared"
+  )
+```
+
+This plot for `r-squared` measure the goodness of fit regarding a model. From the plot, we can see that most of the estimates of `r-squared` range from 0.90 to 0.94, with a peak around 0.92. The majority of the bootstrap samples has a value of 0.92 for its `r_squared`.This indicates a generally good fit of the model. The distribution is slightly skewed to the left.
+
+Provide the 95% confidence interval for r̂ 2
+```{r}
+CI_r_squared=
+  boot_results_rsq|> 
+  summarize(
+    ci_lower = quantile(r.squared, 0.025),
+    ci_upper = quantile(r.squared, 0.975)
+  ) 
+```
+The CI for `r_squared` is [`r pull(CI_r_squared,ci_lower)`, `r pull(CI_r_squared,ci_upper)`]
+
+#### Bootstrap for  log(β̂ 1∗β̂ 2
+
+```{r}
+boot_results_log_beta = 
+  weather_df |> 
+   modelr::bootstrap(n = 5000) |> 
+   mutate(
+    models = map(strap, \(df) lm(tmax ~ tmin+prcp, data=df)),
+    results = map(models, broom::tidy),
+  ) |> 
+  select(id=.id, results) |> 
+  unnest(results) |> 
+  select(id, term, estimate) |> 
+  pivot_wider(
+    names_from=term,
+    values_from=estimate) |> 
+  rename(beta_1=tmin, beta_2=prcp)
+```
+
+Make a plot for log(β̂ 1∗β̂ 2)
+
+```{r}
+filtered_boot_results=
+  boot_results_log_beta |> 
+  filter(beta_1*beta_2>0) |> 
+  mutate(log_beta_product=log(beta_1*beta_2))
+
+filtered_boot_results|> 
+  ggplot(aes(x=pull(filtered_boot_results, log_beta_product)))+
+  geom_density()+
+  labs(
+    x="Bootstrap Log(Beat1*Beta2)",
+    y="Frequency",
+    title="Distribution of Bootstrap Estimated Log(Beat1*Beta2)"
+  )
+```
+
+This plot for `log(beat1*beta2)` has a left-skewed distribution wuth a long tail extending towards lower values. From the plot, we can see that most of the estimates of `log(beat1*beta2)` lies in -7 to -5, with a peak around -5.5.The majority of the bootstrap samples has a value of -5.5 for its `log(beat1*beta2)`, indicating a moderate influence of the two factors.
+
+Provide the 95% confidence interval for log(β̂ 1∗β̂ 2)
+
+```{r}
+CI_log_beta_product=
+  filtered_boot_results|> 
+  summarize(
+    ci_lower = quantile(log_beta_product, 0.025),
+    ci_upper = quantile(log_beta_product, 0.975)
+  )
+```
+
+The CI for `log_beta_product` is [`r pull(CI_log_beta_product,ci_lower)`, `r pull(CI_log_beta_product,ci_upper)`]
