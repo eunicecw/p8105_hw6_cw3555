@@ -241,3 +241,126 @@ CI_log_beta_product=
 ```
 
 The CI for `log_beta_product` is [`r pull(CI_log_beta_product,ci_lower)`, `r pull(CI_log_beta_product,ci_upper)`]
+
+### Problem 3
+
+#### Load and clean the raw data.
+
+```{r}
+bw_df=
+  read_csv("data/birthweight.csv") |> 
+  janitor::clean_names() |> 
+  mutate(
+    babysex=as.factor(babysex),
+    frace=as.factor(frace),
+    malform=as.factor(malform),
+    mrace=as.factor(mrace)
+  ) 
+```
+
+Check for missing data:
+
+```{r}
+sum(is.na(bw_df))
+```
+There is no missing data in the dataset.
+
+#### Propose a regression model for birthweight
+
+```{r}
+fit_bwt_1=
+  bw_df |> 
+  lm(bwt ~babysex+fincome+delwt+wtgain, data=_)
+
+fit_bwt_1 |> 
+  broom::tidy() |> 
+  knitr::kable()
+```
+
+My regression model for birth weight use sex of baby, family monthly income, mother’s weight at delivery and mother’s weight gain during pregnancy as predictors. From the table we can see, the coefficients are all statistically significant.
+
+#### Add predictions & residuals, make a plot of model residuals against fitted values
+```{r}
+bw_1=
+  bw_df |> 
+  add_predictions(fit_bwt_1) |> 
+  add_residuals(fit_bwt_1)
+
+bw_1 |> 
+  ggplot(aes(x=pred,y=resid))+
+  geom_point(alpha=0.5)+
+  geom_smooth(method="lm")+
+  labs(
+    x="Fitted alues",
+    y="Residuals",
+    title="Residuals Against Fitted Values"
+  )
+```
+
+From the plot, we can see that there is no clear pattern. From the smooth line, we can see there is no linear association. 
+
+#### Compare my model to the other two models
+
+One using length at birth and gestational age as predictors (main effects only)
+```{r}
+fit_bwt_2=
+  bw_df |> 
+  lm(bwt ~blength+gaweeks, data=_)
+
+fit_bwt_2 |> 
+  broom::tidy() |> 
+  knitr::kable()
+```
+
+One using head circumference, length, sex, and all interactions (including the three-way interaction) between these
+
+```{r}
+fit_bwt_3=
+  bw_df |> 
+  lm(bwt ~bhead*blength*babysex, data=_)
+
+fit_bwt_3 |> 
+  broom::tidy() |> 
+  knitr::kable()
+```
+
+Make a comparison
+
+```{r}
+cv_df = 
+  crossv_mc(bw_df, 100) |> 
+  mutate(
+    train = map(train, as_tibble),
+    test = map(test, as_tibble)
+  )
+```
+
+```{r}
+cv_results =
+  cv_df |> 
+  mutate(
+    fit_1 = map(train, \(df) lm(bwt ~babysex+fincome+delwt+wtgain, data = df)),
+    fit_2 = map(train, \(df) lm(bwt ~blength+gaweeks, data=df)),
+    fit_3 = map(train, \(df) lm(bwt ~bhead*blength*babysex, data=df))) |> 
+  mutate(
+    rmse_fit_1 = map2_dbl(fit_1, test, \(mod, df) rmse(mod, df)),
+    rmse_fit_2 = map2_dbl(fit_2, test, \(mod, df) rmse(mod, df)),
+    rmse_fit_3 = map2_dbl(fit_3, test, \(mod, df) rmse(mod, df))
+  )
+```
+
+```{r}
+cv_results |> 
+  select(starts_with("rmse")) |> 
+  pivot_longer(
+    everything(),
+    names_to = "model",
+    values_to = "rmse",
+    names_prefix = "rmse_"
+  ) |> 
+  mutate(model=fct_inorder(model)) |> 
+  ggplot(aes(x = model, y = rmse)) +
+  geom_violin()
+```
+
+The violin plot provides a comparison of distribution of RMSE across different models. My model is the worst because it has the highest RMSE. The 3rd model is the best because it has the lowest RMSE. It is perhaps it takes consideration of variable interactions, which captures complex relationship and provides a better fit.
